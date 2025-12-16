@@ -28,7 +28,10 @@ detachAllPackages()
 ```{r setup, include=FALSE}
 library(tidyverse)
 library(stringr)
+library(see)
+library(gridExtra)
 library(tidytext)
+library(apa)
 library(kableExtra)
 library(papaja)
 library(effectsize)
@@ -39,3 +42,515 @@ file <- "bsc_experiment_clean.csv"
 df <- readr::read_csv(file.path(base_url, file))
 
 ```
+
+# Background
+
+This study is part of a broader project examining how perceived violations of the social contract shape political discontent (see <a href="http://deanbaltiansky.com/broken-social-contract/" target="_blank">deanbaltiansky.com/broken-social-contract</a>). Here, I focus on a nationally representative randomized experiment designed to test whether the relationship between a broken social contract and political discontent is causal, and to identify the direction of that effect.
+
+The experiment evaluates whether a short, randomized writing prompt can shift attitudes that are typically stable. Participants identified a personally salient “top value” of the U.S. Constitution and were then randomly assigned to reflect on that value in one of three ways: the promise is being kept, the promise is being broken, or a control prompt that simply defines the value.
+
+I measure three outcomes that capture political discontent: anti-establishment sentiment, trust in government, and support for radical change. An active control condition allows me to interpret directionality—distinguishing whether reflecting on a broken promise increases discontent relative to baseline, versus reflecting on a kept promise decreasing it. Although this experiment is situated in a political context, the underlying mechanism—the effect of broken institutional promises on trust and discontent—has clear implications for organizations and employers, particularly for how employees perceive leadership’s organizational commitments.
+
+# Design Overview
+
+Participants were first oriented to the context of the study—the U.S. Constitution and its promise to citizens. They identified five values they believed the U.S. stands for and then selected the single value they considered most central to that promise. This personally salient “top value” was used to customize a randomized writing prompt.
+
+Participants were then randomly assigned to one of three conditions: *Promise Kept*, *Promise Broken*, or an active *Control*. Across conditions, the same value was referenced, holding value priming constant; only the framing of the prompt varied, isolating the causal effect of reflecting on a kept versus broken institutional promise.
+
+# Participants
+
+```{r,echo=TRUE,results='asis',warning=FALSE,message=F}
+df_elg <- df %>% 
+  filter(exclude == 0) 
+
+total_n <- nrow(df)
+eligible_n = nrow(df_elg)
+
+mean_age <- df_elg %>% 
+  summarise(age_mean = round(mean(AGE,na.rm = T),2)) %>% 
+  pull()
+
+n_white <- df_elg %>% 
+  group_by(RACETHNICITY) %>% 
+  summarise(N = n()) %>% 
+  ungroup() %>% 
+  filter(RACETHNICITY == "white/non-hisp") %>% 
+  select(N) %>% 
+  pull()
+
+n_man <- df_elg %>% 
+  group_by(GENDER) %>% 
+  summarise(N = n()) %>% 
+  ungroup() %>% 
+  filter(GENDER == "male") %>% 
+  select(N) %>% 
+  pull()
+
+income_brackets = c("under $5,000",
+                                  "$5,000 to $9,999",
+                                  "$10,000 to $14,999",
+                                  "$15,000 to $19,999",
+                                  "$20,000 to $24,999",
+                                  "$25,000 to $29,999",
+                                  "$30,000 to $34,999",
+                                  "$35,000 to $39,999",
+                                  "$40,000 to $49,999",
+                                  "$50,000 to $59,999",
+                                  "$60,000 to $74,999",
+                                  "$75,000 to $84,999",
+                                  "$85,000 to $99,999",
+                                  "$100,000 to $124,999",
+                                  "$125,000 to $149,999",
+                                  "$150,000 to $174,999",
+                                  "$175,000 to $199,999",
+                                  "$200,000 or more")
+
+df_incomes <- tibble(bracket = income_brackets,
+       income_num = seq(1,length(income_brackets),1))
+
+median_income <- df_elg %>% 
+  mutate(income = factor(INCOME,income_brackets),
+         income_num = as.numeric(income)) %>% 
+  summarise(median = median(income_num,na.rm = T)) %>% 
+  left_join(df_incomes %>% rename(median = income_num),by = "median") %>% 
+  select(bracket) %>% 
+  pull()
+```
+
+A nationally representative sample of **`r total_n`** U.S. adults was recruited via the AmeriSpeak panel, administered by NORC. The study was designed by me and selected through a competitive, federally funded TESS (Time-sharing Experiments for the Social Sciences) award, which provided access to the AmeriSpeak panel.
+
+After excluding participants who failed pre-specified compliance checks, the final analytic sample consisted of **`r eligible_n`** respondents. The eligible sample was demographically diverse (*M* age = `r mean_age`; `r round(n_man / eligible_n * 100, 1)`% men; `r round(n_white / eligible_n * 100, 1)`% non-Hispanic White), with a median household income in the **`r median_income`** bracket.
+
+# Treatment
+
+## Promise Kept Condition
+
+*We ask that you think about the ways in which [TOP-VALUE] is carried out in American society today, regardless of the party in power or the short-term political fluctuations.*
+
+*In 2-3 sentences, please describe the ways in which the U.S. is living up to its promise of [TOP-VALUE].*
+
+## Promise Broken Condition
+
+*We ask that you think about the ways in which [TOP-VALUE] is carried out in American society today, regardless of the party in power or the short-term political fluctuations.*
+
+*In 2–3 sentences, please describe the ways in which the U.S. is **NOT** living up to its promise of [TOP-VALUE].*
+
+## Control Condition
+
+*In 2-3 sentences, please define [TOP-VALUE].*
+
+# Primary outcomes
+
+I analyze three pre-specified outcomes that reflect **political discontent**: (1) anti-establishment sentiment, (2) trust in government, and (3) support for radical change, all measured on 7-point scales.
+
+To estimate the causal effect of a broken social contract, I focus on the primary contrast between *Promise Broken* and *Promise Kept* and report raw scale-point differences, 95% confidence intervals, and a percentile translation of Cohen’s *d* effect sizes.
+
+The figure below visualizes the treatment effects across all three outcomes.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+summarize_ab <- function(data, y, cond_var = "cond", treat = "brkn", control = "kept") {
+
+  dat <- data %>%
+    filter(.data[[cond_var]] %in% c(control, treat)) %>%
+    mutate(cond = factor(.data[[cond_var]], levels = c(control, treat)))
+
+  stats <- dat %>%
+    group_by(cond) %>%
+    summarise(
+      n      = n(),
+      mean   = mean(.data[[y]], na.rm = TRUE),
+      sd     = sd(.data[[y]], na.rm = TRUE),
+      median = median(.data[[y]], na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  ate <- stats %>%
+    summarise(ate = mean[cond == treat] - mean[cond == control]) %>%
+    pull(ate)
+
+  # t-test in treat - control direction
+  tt <- t.test(
+    x = dat %>% filter(cond == treat) %>% pull(.data[[y]]),
+    y = dat %>% filter(cond == control) %>% pull(.data[[y]])
+  )
+
+  ci <- tt$conf.int
+
+  d <- effectsize::cohens_d(
+    x = dat %>% filter(cond == treat) %>% pull(.data[[y]]),
+    y = dat %>% filter(cond == control) %>% pull(.data[[y]])
+  ) %>% pull(Cohens_d)
+
+  pct <- pnorm(d) * 100
+
+  list(dat = dat, stats = stats, tt = tt, d = d, pct = pct, ate = ate, ci = ci,
+       treat = treat, control = control)
+}
+```
+
+
+```{r,echo=TRUE,results='asis',warning=FALSE,message=FALSE}
+f_innerplot <- function(data,outcome,ylabel){data %>%
+  filter(cond != "ctrl") %>% 
+  mutate(cond = case_when(cond == "brkn" ~ "Promise\nBroken",
+                          cond == "kept" ~ "Promise\nKept",
+                          .default = NA)) %>% 
+  ggplot(aes(x = cond,y = .data[[outcome]],fill = cond)) +
+  scale_color_manual(values = c("darkred",
+                                "darkgreen")) +
+  scale_fill_manual(values = c("darkred",
+                                "darkgreen")) +
+  geom_violinhalf(position = position_nudge(0),
+                  side = "l",
+                  alpha = 0.3,
+                  size = 1,
+                  color = NA) +
+  stat_summary(fun.data = "mean_cl_boot",
+               size = 0.5,
+               geom = "errorbar",
+               width = 0.05,
+               color = "black",
+               position = position_dodge(width = 0)) +
+  stat_summary(fun = "mean",
+               shape = 16,
+               geom = "point",
+               size = 1.8,
+               color = "black",
+               position = position_dodge(width = 0)) +
+  scale_x_discrete(expand = c(0.2,0)) +
+  scale_y_continuous(limits = c(1,7),
+                     breaks = seq(1,7,1)) +
+  ylab(ylabel) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.grid.major.y = element_line(color = "grey66",
+                                          linetype = "dashed"),
+        axis.ticks = element_blank(),
+        axis.line = element_line(color = "grey66"),
+        axis.text.x = element_text(color = "black",
+                             face = "bold",
+                             size = 14,
+                             hjust = 0.5,
+                             vjust = 1),
+        axis.text.y = element_text(color = "black",
+                                   face = "bold",
+                                   size = 11),
+        axis.title.y = element_text(color = "black",
+                                   face = "bold",
+                                   size = 14),
+        axis.title.x = element_blank(),
+        legend.position = "none")}
+```
+
+```{r,fig.align='left',fig.dim=c(10,4),echo=F,message=F,warning=F}
+p1 <- f_innerplot(df_elg,"antiest","Anti-Establishment\nSentiment")
+p2 <- f_innerplot(df_elg,"trustgov","Trust in\nGovernment")
+p3 <- f_innerplot(df_elg,"radchange","Support for\nRadical Change")
+
+#png("treatment_effect.png",width = 700,height = 280,units = "px")
+grid.arrange(p1,p2,p3,nrow = 1)
+```
+
+*Note*. Half-violins show the full response distribution. Black points show group means; vertical bars show bootstrapped 95% confidence intervals. A shared 1–7 axis enables direct comparison of effect magnitude across outcomes.
+
+## Anti-Establishment Sentiment
+
+```{r,include=F}
+alpha_table <- df_elg %>% 
+  dplyr::select(antiest_1,
+                antiest_2,
+                antiest_3,
+                antiest_4R) %>% 
+  psych::alpha()
+
+alpha <- alpha_table$total[1]
+```
+
+Participants indicated their agreement (1 = *Strongly Disagree* to 7 = *Strongly Agree*) with four statements that reflect anti-establishment sentiment (internally consistent; Cronbach's $\alpha$ = `r round(alpha,2)`).
+
+<details>
+<summary>Anti-establishment items</summary>
+  1. The US’s economy is rigged to advantage the rich and powerful
+  2. Traditional politicians and parties don’t care about people like me
+  3. Experts in this country don’t understand the lives of people like me
+  4. Most of the time we can trust people in the government to do what is right [R]
+
+*R indicates a reverse-score item
+</details>
+
+```{r,echo=TRUE,results='asis',warning=FALSE,message=FALSE}
+res <- summarize_ab(df_elg, "antiest")
+
+res$stats %>%
+  mutate(mean = round(mean, 2), sd = round(sd, 2)) %>%
+  select(-median) %>% 
+  rename(N = n, Mean = mean, SD = sd) %>%
+  kbl() %>% 
+  kable_styling(bootstrap_options = "hover",
+                full_width = F,
+                position = "left")
+
+
+```
+
+Participants in the *Promise Broken* condition reported `r ifelse(res$ate > 0, "higher", "lower")` anti-establishment sentiment than those in the *Promise Kept* condition, *t*(`r round(res$tt$parameter,2)`) = `r round(res$tt$statistic,2)`, *p* `r ifelse(res$tt$p.value < .001,"< .001",paste0("= ",round(res$tt$p.value,3)))`, 95% CI [`r round(res$ci[1],2)`, `r round(res$ci[2],2)`], Cohen's *d* = `r round(res$d,2)`.
+
+This corresponds to a **`r round(abs(res$ate), 2)`-point `r ifelse(res$ate > 0, "increase", "decrease")`** on a 7-point scale (ATE = `r round(res$ate,2)`). Interpreted as a percentile shift, the average *Promise Broken* participant would rank at approximately the **`r round(res$pct,0)`th percentile** of the *Promise Kept* distribution.
+
+## Trust in Government
+
+To what extent do you trust the government in Washington, across parties and administrations, to do what is right (1 = *Not at All* to 7 = *A Great Deal*)
+
+```{r,echo=TRUE,results='asis',warning=FALSE,message=FALSE}
+res <- summarize_ab(df_elg, "trustgov")
+
+res$stats %>%
+  mutate(mean = round(mean, 2), sd = round(sd, 2)) %>%
+  select(-median) %>% 
+  rename(N = n, Mean = mean, SD = sd) %>%
+  kbl() %>% 
+  kable_styling(bootstrap_options = "hover",
+                full_width = F,
+                position = "left")
+
+
+```
+
+Participants in the *Promise Broken* condition reported `r ifelse(res$ate > 0, "higher", "lower")` trust in government than those in the *Promise Kept* condition, *t*(`r round(res$tt$parameter,2)`) = `r round(res$tt$statistic,2)`, *p* `r ifelse(res$tt$p.value < .001,"< .001",paste0("= ",round(res$tt$p.value,3)))`, 95% CI [`r round(res$ci[1],2)`, `r round(res$ci[2],2)`], Cohen's *d* = `r round(res$d,2)`.
+
+This corresponds to a **`r round(abs(res$ate), 2)`-point `r ifelse(res$ate > 0, "increase", "decrease")`** on a 7-point scale (ATE = `r round(res$ate,2)`). Interpreted as a percentile shift, the average *Promise Broken* participant would rank at approximately the **`r round(res$pct,0)`th percentile** of the *Promise Kept* distribution.
+
+## Support for Radical Change
+
+Participants indicated their agreement with the following statement (1 = *Strongly Disagree* to 7 = *Strongly Agree*):
+
+*The way this country works needs to be radically changed.*
+
+```{r,echo=TRUE,results='asis',warning=FALSE,message=FALSE}
+res <- summarize_ab(df_elg, "radchange")
+
+res$stats %>%
+  mutate(mean = round(mean, 2), sd = round(sd, 2)) %>%
+  select(-median) %>% 
+  rename(N = n, Mean = mean, SD = sd) %>%
+  kbl() %>% 
+  kable_styling(bootstrap_options = "hover",
+                full_width = F,
+                position = "left")
+
+
+```
+
+Participants in the *Promise Broken* condition reported `r ifelse(res$ate > 0, "higher", "lower")` support for radical change than those in the *Promise Kept* condition, *t*(`r round(res$tt$parameter,2)`) = `r round(res$tt$statistic,2)`, *p* `r ifelse(res$tt$p.value < .001,"< .001",paste0("= ",round(res$tt$p.value,3)))`, 95% CI [`r round(res$ci[1],2)`, `r round(res$ci[2],2)`], Cohen's *d* = `r round(res$d,2)`.
+
+This corresponds to a **`r round(abs(res$ate), 2)`-point `r ifelse(res$ate > 0, "increase", "decrease")`** on a 7-point scale (ATE = `r round(res$ate,2)`). Interpreted as a percentile shift, the average *Promise Broken* participant would rank at approximately the **`r round(res$pct,0)`th percentile** of the *Promise Kept* distribution.
+
+# Comparison to Baseline
+
+The primary A/B contrast (*Promise Broken* vs *Promise Kept*) shows clear differences, but that contrast alone does not tell us whether the effect is driven by the *Broken* prompt increasing discontent, the *Kept* prompt decreasing discontent, or both.
+
+To anchor interpretation, I include an active *Control* condition in which participants see the same personally salient “top value,” but are simply asked to define it. This holds constant the act of reflecting on the value and writing a short response, while removing the “kept vs broken promise” framing.
+
+I estimate direction relative to baselines using a one-way ANOVA with Tukey-adjusted pairwise comparisons across the three conditions (*Kept*, *Control*, *Broken*).
+
+```{r,echo=TRUE,results='asis',warning=FALSE,message=FALSE}
+directionality_anova <- function(data, y, cond_var = "cond",
+                                 levels = c("kept", "ctrl", "brkn")) {
+
+  dat <- data %>%
+    dplyr::filter(.data[[cond_var]] %in% levels) %>%
+    dplyr::mutate(cond = factor(.data[[cond_var]], levels = levels))
+
+  stats <- dat %>%
+    dplyr::group_by(cond) %>%
+    dplyr::summarise(
+      N = dplyr::n(),
+      Mean = mean(.data[[y]], na.rm = TRUE),
+      SD = sd(.data[[y]], na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  aov_fit <- stats::aov(stats::as.formula(paste0(y, " ~ cond")), data = dat)
+
+  tuk <- stats::TukeyHSD(aov_fit)$cond %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column("comparison") %>%
+    dplyr::rename(diff = diff, lwr = lwr, upr = upr, p_adj = `p adj`)
+
+  # Pull the specific comparisons (names depend on factor level order)
+  pull_cmp <- function(name) tuk %>% dplyr::filter(comparison == name) %>% dplyr::slice(1)
+
+  brkn_kept <- pull_cmp("brkn-kept")
+  brkn_ctrl <- pull_cmp("brkn-ctrl")
+  ctrl_kept <- pull_cmp("ctrl-kept")
+
+  # Interpretation (very lightweight + consistent)
+  interpret <- dplyr::case_when(
+    brkn_ctrl$p_adj < .05 & ctrl_kept$p_adj >= .05 ~
+      "Pattern is consistent with the *Broken* prompt shifting outcomes away from baseline (Control), while the *Kept* prompt does not differ from baseline.",
+    ctrl_kept$p_adj < .05 & brkn_ctrl$p_adj >= .05 ~
+      "Pattern is consistent with the *Kept* prompt shifting outcomes away from baseline (Control), while the *Broken* prompt does not differ from baseline.",
+    brkn_ctrl$p_adj < .05 & ctrl_kept$p_adj < .05 ~
+      "Both experimental prompts differ from baseline (Control), suggesting the effect may be driven by both directions.",
+    TRUE ~
+      "Pairwise differences are not conclusive after Tukey adjustment; directionality is ambiguous in this outcome."
+  )
+
+  list(
+    dat = dat,
+    stats = stats,
+    aov = aov_fit,
+    tukey = tuk,
+    brkn_kept = brkn_kept,
+    brkn_ctrl = brkn_ctrl,
+    ctrl_kept = ctrl_kept,
+    interpretation = interpret
+  )
+}
+
+```
+
+
+## Anti-Esablishment Sentiment
+
+**Descriptives:**
+
+```{r,echo=TRUE,results='asis',warning=FALSE,message=FALSE}
+df_elg %>% 
+  group_by(cond) %>% 
+  summarise(N = n(),
+            Mean = round(mean(antiest,na.rm = T),2),
+            SD = round(sd(antiest,na.rm = T),2)) %>% 
+  ungroup() %>% 
+  kbl() %>% 
+  kable_styling(bootstrap_options = "hover",
+                full_width = F,
+                position = "left")
+```
+
+**One-way ANOVA Omnibus Effect:**
+
+```{r,echo=FALSE,results='asis',fig.align='left',message=FALSE}
+res_dir <- directionality_anova(df_elg, "antiest")
+
+anova_apa(res_dir$aov, format = "rmarkdown", effect = "cond")
+```
+
+**Tukey-HSD Post-Hoc Comparisons:** (adjusting for multiple comparisons)
+
+```{r, echo=TRUE, results='asis', warning=FALSE, message=FALSE}
+res_dir$tukey %>%
+  dplyr::mutate(
+    diff = round(diff, 2),
+    lwr  = round(lwr, 2),
+    upr  = round(upr, 2),
+    p_adj = ifelse(p_adj < .001, "< .001", round(p_adj, 3))
+  ) %>%
+  knitr::kable() %>%
+  kableExtra::kable_styling(bootstrap_options = "hover", full_width = FALSE, position = "left")
+```
+
+`r res_dir$interpretation`
+
+This suggests that people's baseline is that the social contract is generally intact, and that when it breaks - their anti-establishment sentiment **increases**.
+
+## Trust in Government
+
+**Descriptives:**
+
+```{r,echo=TRUE,results='asis',warning=FALSE,message=FALSE}
+df_elg %>% 
+  group_by(cond) %>% 
+  summarise(N = n(),
+            Mean = round(mean(trustgov,na.rm = T),2),
+            SD = round(sd(trustgov,na.rm = T),2)) %>% 
+  ungroup() %>% 
+  kbl() %>% 
+  kable_styling(bootstrap_options = "hover",
+                full_width = F,
+                position = "left")
+```
+
+**One-way ANOVA Omnibus Effect:**
+
+```{r,echo=FALSE,results='asis',fig.align='left',message=FALSE}
+res_dir <- directionality_anova(df_elg, "trustgov")
+
+anova_apa(res_dir$aov, format = "rmarkdown", effect = "cond")
+```
+
+**Tukey-HSD Post-Hoc Comparisons:** (adjusting for multiple comparisons)
+
+```{r, echo=TRUE, results='asis', warning=FALSE, message=FALSE}
+res_dir$tukey %>%
+  dplyr::mutate(
+    diff = round(diff, 2),
+    lwr  = round(lwr, 2),
+    upr  = round(upr, 2),
+    p_adj = ifelse(p_adj < .001, "< .001", round(p_adj, 3))
+  ) %>%
+  knitr::kable() %>%
+  kableExtra::kable_styling(bootstrap_options = "hover", full_width = FALSE, position = "left")
+```
+
+`r res_dir$interpretation`
+
+It turns out, pairwise differences are not statistically distinguishable from zero for trust in government. Therefore, I cannot conclusively determine whether reflecting on a broken promise *decreases* trust relative to baseline, whether reflecting on a kept promise *increases* trust, or whether both are at play. That said, point estimates trend in the same direction as the other outcome variables, suggesting a similar pattern that may have been undetectable at this sample size.
+
+## Support for Radical Change
+
+**Descriptives:**
+
+```{r,echo=TRUE,results='asis',warning=FALSE,message=FALSE}
+df_elg %>% 
+  group_by(cond) %>% 
+  summarise(N = n(),
+            Mean = round(mean(radchange,na.rm = T),2),
+            SD = round(sd(radchange,na.rm = T),2)) %>% 
+  ungroup() %>% 
+  kbl() %>% 
+  kable_styling(bootstrap_options = "hover",
+                full_width = F,
+                position = "left")
+```
+
+**One-way ANOVA Omnibus Effect:**
+
+```{r,echo=FALSE,results='asis',fig.align='left',message=FALSE}
+res_dir <- directionality_anova(df_elg, "radchange")
+
+anova_apa(res_dir$aov, format = "rmarkdown", effect = "cond")
+```
+
+**Tukey-HSD Post-Hoc Comparisons:** (adjusting for multiple comparisons)
+
+```{r, echo=TRUE, results='asis', warning=FALSE, message=FALSE}
+res_dir$tukey %>%
+  dplyr::mutate(
+    diff = round(diff, 2),
+    lwr  = round(lwr, 2),
+    upr  = round(upr, 2),
+    p_adj = ifelse(p_adj < .001, "< .001", round(p_adj, 3))
+  ) %>%
+  knitr::kable() %>%
+  kableExtra::kable_styling(bootstrap_options = "hover", full_width = FALSE, position = "left")
+```
+
+`r res_dir$interpretation`
+
+This suggests that people's baseline is that the social contract is generally intact, and that when it breaks - they show **greater** support for radical change.
+
+# Summary & Takeaways
+
+```{r,include=F}
+res_antiest <- summarize_ab(df_elg, "antiest")
+res_trustgov <- summarize_ab(df_elg, "trustgov")
+res_radchg <- summarize_ab(df_elg, "radchange")
+```
+
+  - A short, randomized reflection prompt about a personally salient institutional value moved outcomes that are usually stable.
+  - The primary A/B contrast (*Promise Broken* vs. *Promise Kept*) shows consistent movement toward greater political discontent: Reflecting on a broken social contract leads to higher anti-establishment sentiment (ATE = `r round(summarize_ab(df_elg, "antiest")$ate, 2)`), lower trust in government (ATE = `r round(summarize_ab(df_elg, "trustgov")$ate, 2)`), and greater support for radical change (ATE = `r round(summarize_ab(df_elg, "radchange")$ate, 2)`), relative to reflecting on an intact one.
+  - Adding an active baseline (Control) sharpens interpretation: for anti-establishment sentiment and support for radical change, the pattern is consistent with the broken promise *increasing* political discontent relative to baseline. Trust in government points in the same direction but is not statistically distinguishable across all three conditions after multiple-comparison correction, so I treat that outcome as directional but inconclusive.
+  - Methodologically, this work contributes a novel, value-personalized experimental paradigm and applies it to causal estimation of attitudinal outcomes in a nationally representative U.S. sample, combining pre-specified endpoints, effect size translation, and baseline comparisons.
+  - Substantively, the findings support a general mechanism: perceived violations of institutional commitments can increase discontent, which plausibly extends to organizational contexts in which employees interpret leadership commitments as upheld vs. broken.
