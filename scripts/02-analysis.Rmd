@@ -45,7 +45,7 @@ df <- readr::read_csv(file.path(base_url, file))
 
 # Background
 
-This study is part of a broader project examining how perceived violations of the social contract shape political discontent (see <a href="http://deanbaltiansky.com/portfolio-social-contract/" target="_blank">deanbaltiansky.com/broken-social-contract</a>). Here, I focus on a nationally representative randomized experiment designed to test whether the relationship between a broken social contract and political discontent is causal, and to identify the direction of that effect.
+This study is part of a broader project examining how perceived violations of the social contract shape political discontent (see <a href="http://deanbaltiansky.com/portfolio-social-contract/" target="_blank">deanbaltiansky.com/portfolio-social-contract</a>). Here, I focus on a nationally representative randomized experiment designed to test whether the relationship between a broken social contract and political discontent is causal, and to identify the direction of that effect.
 
 The experiment evaluates whether a short, randomized writing prompt can shift attitudes that are typically stable. Participants identified a personally salient “top value” of the U.S. Constitution and were then randomly assigned to reflect on that value in one of three ways: the promise is being kept, the promise is being broken, or a control prompt that simply defines the value.
 
